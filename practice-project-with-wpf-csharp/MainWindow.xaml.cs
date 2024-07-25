@@ -3,6 +3,9 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.IO;
+using System.Collections.ObjectModel;
+using System.Xml.Serialization;
 
 namespace practice_project_with_wpf_csharp
 {
@@ -15,12 +18,23 @@ namespace practice_project_with_wpf_csharp
         public bool IsHead { get; set; }
     }
 
+    public class SnakeHighscore
+    {
+        public string PlayerName { get; set; }
+
+        public int Score { get; set; }
+    }
+
     public partial class MainWindow : Window
     {
         const int SnakeSquareSize = 20;
         const int SnakeStartLength = 3;
         const int SnakeStartSpeed = 400;
         const int SnakeSpeedThreshold = 100;
+        const int MaxHighscoreListEntryCount = 5;
+
+        public ObservableCollection<SnakeHighscore> HighscoreList { get; set; } =
+            new ObservableCollection<SnakeHighscore>();
 
         private List<SnakePart> snakeParts = new List<SnakePart>();
         private SolidColorBrush snakeBodyBrush = Brushes.Green;
@@ -41,6 +55,7 @@ namespace practice_project_with_wpf_csharp
         {
             InitializeComponent();
             gameTickTimer.Tick += GameTickTimer_Tick;
+            LoadHighscoreList();
         }
 
         private void GameTickTimer_Tick(object sender, EventArgs e)
@@ -51,12 +66,17 @@ namespace practice_project_with_wpf_csharp
         private void Window_ContentRendered(object sender, EventArgs e)
         {
             DrawGameArea();
-            StartNewGame();
         }
 
         private void Window_MouseDown(object sender, MouseButtonEventArgs e)
         {
             this.DragMove();
+        }
+
+        private void BtnShowHighscoreList_Click(object sender, RoutedEventArgs e)
+        {
+            bdrWelcomeMessage.Visibility = Visibility.Collapsed;
+            bdrHighscoreList.Visibility = Visibility.Visible;
         }
 
         private void BtnClose_Click(object sender, RoutedEventArgs e)
@@ -92,6 +112,24 @@ namespace practice_project_with_wpf_csharp
             }
 
             if (snakeDirection != originalSnakeDirection) MoveSnake();
+        }
+
+        private void LoadHighscoreList()
+        {
+            if (File.Exists("snake_highscorelist.xml"))
+            {
+                XmlSerializer serializer = new XmlSerializer(typeof(List<SnakeHighscore>));
+
+                using (Stream reader = new FileStream("snake_highscorelist.xml", FileMode.Open))
+                {
+                    List<SnakeHighscore> tempList = (List<SnakeHighscore>)serializer.Deserialize(reader);
+
+                    this.HighscoreList.Clear();
+
+                    foreach (var item in tempList.OrderByDescending(x => x.Score))
+                        this.HighscoreList.Add(item);
+                }
+            }
         }
 
         private void DrawGameArea()
@@ -182,6 +220,10 @@ namespace practice_project_with_wpf_csharp
 
         private void StartNewGame()
         {
+            bdrWelcomeMessage.Visibility = Visibility.Collapsed;
+            bdrHighscoreList.Visibility = Visibility.Collapsed;
+            bdrEndOfGame.Visibility = Visibility.Collapsed;
+
             // Remove potential dead snake parts and leftover food...
             foreach (SnakePart snakeBodyPart in snakeParts)
             {
@@ -210,8 +252,29 @@ namespace practice_project_with_wpf_csharp
 
         private void EndGame()
         {
+            bool isNewHighscore = false;
+
+            if (currentScore > 0)
+            {
+                int lowestHighscore = (this.HighscoreList.Count > 0 ?
+                    this.HighscoreList.Min(x => x.Score) : 0);
+
+                if ((currentScore > lowestHighscore) ||
+                    (this.HighscoreList.Count < MaxHighscoreListEntryCount))
+                {
+                    bdrNewHighscore.Visibility = Visibility.Visible;
+                    txtPlayerName.Focus();
+                    isNewHighscore = true;
+                }
+            }
+
+            if (!isNewHighscore)
+            {
+                tbFinalScore.Text = currentScore.ToString();
+                bdrEndOfGame.Visibility = Visibility.Visible;
+            }
+
             gameTickTimer.IsEnabled = false;
-            MessageBox.Show("Oooops, you died!\n\nTo start a new game, just press the Space bar...", "SnakeWPF");
         }
 
         private void EatSnakeFood()
@@ -295,6 +358,43 @@ namespace practice_project_with_wpf_csharp
             DrawSnake();
             // Finally: Check if it just hit something!
             DoCollisionCheck();
+        }
+
+        private void SaveHighscoreList()
+        {
+            XmlSerializer serializer = new XmlSerializer(typeof(ObservableCollection<SnakeHighscore>));
+
+            using (Stream writer = new FileStream("snake_highscorelist.xml", FileMode.Create))
+            {
+                serializer.Serialize(writer, this.HighscoreList);
+            }
+        }
+
+        private void BtnAddToHighscoreList_Click(object sender, RoutedEventArgs e)
+        {
+            int newIndex = 0;
+
+            // Where should the new entry be inserted?
+            if ((this.HighscoreList.Count > 0) &&
+                (currentScore < this.HighscoreList.Max(x => x.Score)))
+            {
+                SnakeHighscore justAbove = this.HighscoreList.OrderByDescending(
+                    x => x.Score).First(x => x.Score >= currentScore);
+
+                if (justAbove != null) newIndex = this.HighscoreList.IndexOf(justAbove) + 1;
+            }
+
+            // Create & insert the new entry
+            this.HighscoreList.Insert(newIndex, new SnakeHighscore()
+            { PlayerName = txtPlayerName.Text, Score = currentScore });
+
+            // Make sure that the amount of entries does not exceed the maximum
+            while (this.HighscoreList.Count > MaxHighscoreListEntryCount)
+                this.HighscoreList.RemoveAt(MaxHighscoreListEntryCount);
+
+            SaveHighscoreList();
+            bdrNewHighscore.Visibility = Visibility.Collapsed;
+            bdrHighscoreList.Visibility = Visibility.Visible;
         }
     }
 }
